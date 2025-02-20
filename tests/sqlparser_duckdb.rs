@@ -60,7 +60,6 @@ fn test_struct() {
         vec![ColumnDef {
             name: "s".into(),
             data_type: struct_type1.clone(),
-            collation: None,
             options: vec![],
         }]
     );
@@ -75,7 +74,6 @@ fn test_struct() {
                 Box::new(struct_type1),
                 None
             )),
-            collation: None,
             options: vec![],
         }]
     );
@@ -120,7 +118,6 @@ fn test_struct() {
                 Box::new(struct_type2),
                 None
             )),
-            collation: None,
             options: vec![],
         }]
     );
@@ -160,7 +157,7 @@ fn test_select_wildcard_with_exclude() {
     let select =
         duckdb().verified_only_select("SELECT name.* EXCLUDE department_id FROM employee_table");
     let expected = SelectItem::QualifiedWildcard(
-        ObjectName::from(vec![Ident::new("name")]),
+        SelectItemQualifiedWildcardKind::ObjectName(ObjectName::from(vec![Ident::new("name")])),
         WildcardAdditionalOptions {
             opt_exclude: Some(ExcludeSelectItem::Single(Ident::new("department_id"))),
             ..Default::default()
@@ -288,6 +285,7 @@ fn test_select_union_by_name() {
                 qualify: None,
                 value_table_mode: None,
                 connect_by: None,
+                flavor: SelectFlavor::Standard,
             }))),
             right: Box::<SetExpr>::new(SetExpr::Select(Box::new(Select {
                 select_token: AttachedToken::empty(),
@@ -317,6 +315,7 @@ fn test_select_union_by_name() {
                 qualify: None,
                 value_table_mode: None,
                 connect_by: None,
+                flavor: SelectFlavor::Standard,
             }))),
         });
         assert_eq!(ast.body, expected);
@@ -669,7 +668,6 @@ fn test_duckdb_union_datatype() {
                         field_name: "a".into(),
                         field_type: DataType::Int(None)
                     }]),
-                    collation: Default::default(),
                     options: Default::default()
                 },
                 ColumnDef {
@@ -684,7 +682,6 @@ fn test_duckdb_union_datatype() {
                             field_type: DataType::Int(None)
                         }
                     ]),
-                    collation: Default::default(),
                     options: Default::default()
                 },
                 ColumnDef {
@@ -696,7 +693,6 @@ fn test_duckdb_union_datatype() {
                             field_type: DataType::Int(None)
                         }])
                     }]),
-                    collation: Default::default(),
                     options: Default::default()
                 }
             ],

@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use crate::ast::query::SelectItemQualifiedWildcardKind;
 use core::iter;
 
 use crate::tokenizer::Span;
@@ -214,6 +215,7 @@ impl Spanned for Values {
 /// - [Statement::CopyIntoSnowflake]
 /// - [Statement::CreateSecret]
 /// - [Statement::CreateRole]
+/// - [Statement::AlterType]
 /// - [Statement::AlterRole]
 /// - [Statement::AttachDatabase]
 /// - [Statement::AttachDuckDBDatabase]
@@ -332,8 +334,8 @@ impl Spanned for Statement {
             } => source.span(),
             Statement::CopyIntoSnowflake {
                 into: _,
-                from_stage: _,
-                from_stage_alias: _,
+                from_obj: _,
+                from_obj_alias: _,
                 stage_params: _,
                 from_transformations: _,
                 files: _,
@@ -341,6 +343,9 @@ impl Spanned for Statement {
                 file_format: _,
                 copy_options: _,
                 validation_mode: _,
+                kind: _,
+                from_query: _,
+                partition: _,
             } => Span::empty(),
             Statement::Close { cursor } => match cursor {
                 CloseCursor::All => Span::empty(),
@@ -397,6 +402,7 @@ impl Spanned for Statement {
             Statement::CreateIndex(create_index) => create_index.span(),
             Statement::CreateRole { .. } => Span::empty(),
             Statement::CreateSecret { .. } => Span::empty(),
+            Statement::CreateConnector { .. } => Span::empty(),
             Statement::AlterTable {
                 name,
                 if_exists: _,
@@ -422,6 +428,7 @@ impl Spanned for Statement {
                     .chain(with_options.iter().map(|i| i.span())),
             ),
             // These statements need to be implemented
+            Statement::AlterType { .. } => Span::empty(),
             Statement::AlterRole { .. } => Span::empty(),
             Statement::AttachDatabase { .. } => Span::empty(),
             Statement::AttachDuckDBDatabase { .. } => Span::empty(),
@@ -486,9 +493,12 @@ impl Spanned for Statement {
             Statement::OptimizeTable { .. } => Span::empty(),
             Statement::CreatePolicy { .. } => Span::empty(),
             Statement::AlterPolicy { .. } => Span::empty(),
+            Statement::AlterConnector { .. } => Span::empty(),
             Statement::DropPolicy { .. } => Span::empty(),
+            Statement::DropConnector { .. } => Span::empty(),
             Statement::ShowDatabases { .. } => Span::empty(),
             Statement::ShowSchemas { .. } => Span::empty(),
+            Statement::ShowObjects { .. } => Span::empty(),
             Statement::ShowViews { .. } => Span::empty(),
             Statement::LISTEN { .. } => Span::empty(),
             Statement::NOTIFY { .. } => Span::empty(),
@@ -594,15 +604,10 @@ impl Spanned for ColumnDef {
         let ColumnDef {
             name,
             data_type: _, // enum
-            collation,
             options,
         } = self;
 
-        union_spans(
-            core::iter::once(name.span)
-                .chain(collation.iter().map(|i| i.span()))
-                .chain(options.iter().map(|i| i.span())),
-        )
+        union_spans(core::iter::once(name.span).chain(options.iter().map(|i| i.span())))
     }
 }
 
@@ -757,6 +762,7 @@ impl Spanned for ColumnOption {
             ColumnOption::Check(expr) => expr.span(),
             ColumnOption::DialectSpecific(_) => Span::empty(),
             ColumnOption::CharacterSet(object_name) => object_name.span(),
+            ColumnOption::Collation(object_name) => object_name.span(),
             ColumnOption::Comment(_) => Span::empty(),
             ColumnOption::OnUpdate(expr) => expr.span(),
             ColumnOption::Generated { .. } => Span::empty(),
@@ -1265,7 +1271,7 @@ impl Spanned for AssignmentTarget {
 /// f.e. `IS NULL <expr>` reports as `<expr>::span`.
 ///
 /// Missing spans:
-/// - [Expr::TypedString]
+/// - [Expr::TypedString] # missing span for data_type
 /// - [Expr::MatchAgainst] # MySQL specific
 /// - [Expr::RLike] # MySQL specific
 /// - [Expr::Struct] # BigQuery specific
@@ -1278,7 +1284,6 @@ impl Spanned for Expr {
         match self {
             Expr::Identifier(ident) => ident.span,
             Expr::CompoundIdentifier(vec) => union_spans(vec.iter().map(|i| i.span)),
-            Expr::CompositeAccess { expr, key } => expr.span().union(&key.span),
             Expr::CompoundFieldAccess { root, access_chain } => {
                 union_spans(iter::once(root.span()).chain(access_chain.iter().map(|i| i.span())))
             }
@@ -1361,7 +1366,7 @@ impl Spanned for Expr {
                 .union(&union_spans(collation.0.iter().map(|i| i.span()))),
             Expr::Nested(expr) => expr.span(),
             Expr::Value(value) => value.span(),
-            Expr::TypedString { .. } => Span::empty(),
+            Expr::TypedString { value, .. } => value.span(),
             Expr::Function(function) => function.span(),
             Expr::GroupingSets(vec) => {
                 union_spans(vec.iter().flat_map(|i| i.iter().map(|k| k.span())))
@@ -1468,7 +1473,6 @@ impl Spanned for Expr {
             Expr::OuterJoin(expr) => expr.span(),
             Expr::Prior(expr) => expr.span(),
             Expr::Lambda(_) => Span::empty(),
-            Expr::Method(_) => Span::empty(),
         }
     }
 }
@@ -1623,16 +1627,23 @@ impl Spanned for JsonPathElem {
     }
 }
 
+impl Spanned for SelectItemQualifiedWildcardKind {
+    fn span(&self) -> Span {
+        match self {
+            SelectItemQualifiedWildcardKind::ObjectName(object_name) => object_name.span(),
+            SelectItemQualifiedWildcardKind::Expr(expr) => expr.span(),
+        }
+    }
+}
+
 impl Spanned for SelectItem {
     fn span(&self) -> Span {
         match self {
             SelectItem::UnnamedExpr(expr) => expr.span(),
             SelectItem::ExprWithAlias { expr, alias } => expr.span().union(&alias.span),
-            SelectItem::QualifiedWildcard(object_name, wildcard_additional_options) => union_spans(
-                object_name
-                    .0
-                    .iter()
-                    .map(|i| i.span())
+            SelectItem::QualifiedWildcard(kind, wildcard_additional_options) => union_spans(
+                [kind.span()]
+                    .into_iter()
                     .chain(iter::once(wildcard_additional_options.span())),
             ),
             SelectItem::Wildcard(wildcard_additional_options) => wildcard_additional_options.span(),
@@ -1739,6 +1750,7 @@ impl Spanned for TableFactor {
                 partitions: _,
                 json_path: _,
                 sample: _,
+                index_hints: _,
             } => union_spans(
                 name.0
                     .iter()
@@ -1992,8 +2004,11 @@ impl Spanned for Join {
 impl Spanned for JoinOperator {
     fn span(&self) -> Span {
         match self {
+            JoinOperator::Join(join_constraint) => join_constraint.span(),
             JoinOperator::Inner(join_constraint) => join_constraint.span(),
+            JoinOperator::Left(join_constraint) => join_constraint.span(),
             JoinOperator::LeftOuter(join_constraint) => join_constraint.span(),
+            JoinOperator::Right(join_constraint) => join_constraint.span(),
             JoinOperator::RightOuter(join_constraint) => join_constraint.span(),
             JoinOperator::FullOuter(join_constraint) => join_constraint.span(),
             JoinOperator::CrossJoin => Span::empty(),
@@ -2060,6 +2075,7 @@ impl Spanned for Select {
             value_table_mode: _,      // todo, BigQuery specific
             connect_by,
             top_before_distinct: _,
+            flavor: _,
         } = self;
 
         union_spans(
@@ -2138,10 +2154,11 @@ impl Spanned for SelectInto {
 
 impl Spanned for UpdateTableFromKind {
     fn span(&self) -> Span {
-        match self {
-            UpdateTableFromKind::BeforeSet(from) => from.span(),
-            UpdateTableFromKind::AfterSet(from) => from.span(),
-        }
+        let from = match self {
+            UpdateTableFromKind::BeforeSet(from) => from,
+            UpdateTableFromKind::AfterSet(from) => from,
+        };
+        union_spans(from.iter().map(|t| t.span()))
     }
 }
 

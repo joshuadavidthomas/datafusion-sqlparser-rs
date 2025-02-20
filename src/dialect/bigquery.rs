@@ -16,6 +16,28 @@
 // under the License.
 
 use crate::dialect::Dialect;
+use crate::keywords::Keyword;
+use crate::parser::Parser;
+
+/// These keywords are disallowed as column identifiers. Such that
+/// `SELECT 5 AS <col> FROM T` is rejected by BigQuery.
+const RESERVED_FOR_COLUMN_ALIAS: &[Keyword] = &[
+    Keyword::WITH,
+    Keyword::SELECT,
+    Keyword::WHERE,
+    Keyword::GROUP,
+    Keyword::HAVING,
+    Keyword::ORDER,
+    Keyword::LATERAL,
+    Keyword::LIMIT,
+    Keyword::FETCH,
+    Keyword::UNION,
+    Keyword::EXCEPT,
+    Keyword::INTERSECT,
+    Keyword::FROM,
+    Keyword::INTO,
+    Keyword::END,
+];
 
 /// A [`Dialect`] for [Google Bigquery](https://cloud.google.com/bigquery/)
 #[derive(Debug, Default)]
@@ -83,8 +105,27 @@ impl Dialect for BigQueryDialect {
         true
     }
 
+    /// See <https://cloud.google.com/bigquery/docs/reference/standard-sql/query-syntax#select_expression_star>
+    fn supports_select_expr_star(&self) -> bool {
+        true
+    }
+
+    /// See <https://cloud.google.com/bigquery/docs/reference/standard-sql/procedural-language#execute_immediate>
+    fn supports_execute_immediate(&self) -> bool {
+        true
+    }
+
     // See <https://cloud.google.com/bigquery/docs/access-historical-data>
     fn supports_timestamp_versioning(&self) -> bool {
         true
+    }
+
+    // See <https://cloud.google.com/bigquery/docs/reference/standard-sql/query-syntax#group_by_clause>
+    fn supports_group_by_expr(&self) -> bool {
+        true
+    }
+
+    fn is_column_alias(&self, kw: &Keyword, _parser: &mut Parser) -> bool {
+        !RESERVED_FOR_COLUMN_ALIAS.contains(kw)
     }
 }

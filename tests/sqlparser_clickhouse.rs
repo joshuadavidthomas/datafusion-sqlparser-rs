@@ -101,6 +101,7 @@ fn parse_map_access_expr() {
             qualify: None,
             value_table_mode: None,
             connect_by: None,
+            flavor: SelectFlavor::Standard,
         },
         select
     );
@@ -527,7 +528,6 @@ fn column_def(name: Ident, data_type: DataType) -> ColumnDef {
     ColumnDef {
         name,
         data_type,
-        collation: None,
         options: vec![],
     }
 }
@@ -616,7 +616,6 @@ fn parse_create_table_with_nullable() {
                     ColumnDef {
                         name: "d".into(),
                         data_type: DataType::Date32,
-                        collation: None,
                         options: vec![ColumnOptionDef {
                             name: None,
                             option: ColumnOption::Null
@@ -660,7 +659,6 @@ fn parse_create_table_with_nested_data_types() {
                                 DataType::LowCardinality(Box::new(DataType::String(None)))
                             )
                         ]),
-                        collation: None,
                         options: vec![],
                     },
                     ColumnDef {
@@ -677,7 +675,6 @@ fn parse_create_table_with_nested_data_types() {
                                 }
                             ])
                         ))),
-                        collation: None,
                         options: vec![],
                     },
                     ColumnDef {
@@ -694,7 +691,6 @@ fn parse_create_table_with_nested_data_types() {
                                 ))
                             },
                         ]),
-                        collation: None,
                         options: vec![],
                     },
                     ColumnDef {
@@ -703,7 +699,6 @@ fn parse_create_table_with_nested_data_types() {
                             Box::new(DataType::String(None)),
                             Box::new(DataType::UInt16)
                         ),
-                        collation: None,
                         options: vec![],
                     },
                 ]
@@ -735,13 +730,11 @@ fn parse_create_table_with_primary_key() {
                     ColumnDef {
                         name: Ident::with_quote('`', "i"),
                         data_type: DataType::Int(None),
-                        collation: None,
                         options: vec![],
                     },
                     ColumnDef {
                         name: Ident::with_quote('`', "k"),
                         data_type: DataType::Int(None),
-                        collation: None,
                         options: vec![],
                     },
                 ],
@@ -813,7 +806,6 @@ fn parse_create_table_with_variant_default_expressions() {
                     ColumnDef {
                         name: Ident::new("a"),
                         data_type: DataType::Datetime(None),
-                        collation: None,
                         options: vec![ColumnOptionDef {
                             name: None,
                             option: ColumnOption::Materialized(Expr::Function(Function {
@@ -835,7 +827,6 @@ fn parse_create_table_with_variant_default_expressions() {
                     ColumnDef {
                         name: Ident::new("b"),
                         data_type: DataType::Datetime(None),
-                        collation: None,
                         options: vec![ColumnOptionDef {
                             name: None,
                             option: ColumnOption::Ephemeral(Some(Expr::Function(Function {
@@ -857,7 +848,6 @@ fn parse_create_table_with_variant_default_expressions() {
                     ColumnDef {
                         name: Ident::new("c"),
                         data_type: DataType::Datetime(None),
-                        collation: None,
                         options: vec![ColumnOptionDef {
                             name: None,
                             option: ColumnOption::Ephemeral(None)
@@ -866,7 +856,6 @@ fn parse_create_table_with_variant_default_expressions() {
                     ColumnDef {
                         name: Ident::new("d"),
                         data_type: DataType::String(None),
-                        collation: None,
                         options: vec![ColumnOptionDef {
                             name: None,
                             option: ColumnOption::Alias(Expr::Function(Function {
@@ -1066,61 +1055,6 @@ fn parse_create_materialized_view() {
         "GROUP BY domain_name, month"
     );
     clickhouse_and_generic().verified_stmt(sql);
-}
-
-#[test]
-fn parse_group_by_with_modifier() {
-    let clauses = ["x", "a, b", "ALL"];
-    let modifiers = [
-        "WITH ROLLUP",
-        "WITH CUBE",
-        "WITH TOTALS",
-        "WITH ROLLUP WITH CUBE",
-    ];
-    let expected_modifiers = [
-        vec![GroupByWithModifier::Rollup],
-        vec![GroupByWithModifier::Cube],
-        vec![GroupByWithModifier::Totals],
-        vec![GroupByWithModifier::Rollup, GroupByWithModifier::Cube],
-    ];
-    for clause in &clauses {
-        for (modifier, expected_modifier) in modifiers.iter().zip(expected_modifiers.iter()) {
-            let sql = format!("SELECT * FROM t GROUP BY {clause} {modifier}");
-            match clickhouse_and_generic().verified_stmt(&sql) {
-                Statement::Query(query) => {
-                    let group_by = &query.body.as_select().unwrap().group_by;
-                    if clause == &"ALL" {
-                        assert_eq!(group_by, &GroupByExpr::All(expected_modifier.to_vec()));
-                    } else {
-                        assert_eq!(
-                            group_by,
-                            &GroupByExpr::Expressions(
-                                clause
-                                    .split(", ")
-                                    .map(|c| Identifier(Ident::new(c)))
-                                    .collect(),
-                                expected_modifier.to_vec()
-                            )
-                        );
-                    }
-                }
-                _ => unreachable!(),
-            }
-        }
-    }
-
-    // invalid cases
-    let invalid_cases = [
-        "SELECT * FROM t GROUP BY x WITH",
-        "SELECT * FROM t GROUP BY x WITH ROLLUP CUBE",
-        "SELECT * FROM t GROUP BY x WITH WITH ROLLUP",
-        "SELECT * FROM t GROUP BY WITH ROLLUP",
-    ];
-    for sql in invalid_cases {
-        clickhouse_and_generic()
-            .parse_sql_statements(sql)
-            .expect_err("Expected: one of ROLLUP or CUBE or TOTALS, found: WITH");
-    }
 }
 
 #[test]

@@ -245,8 +245,24 @@ pub trait Dialect: Debug + Any {
         false
     }
 
+    /// Returns true if the dialects supports `GROUP BY` modifiers prefixed by a `WITH` keyword.
+    /// Example: `GROUP BY value WITH ROLLUP`.
+    fn supports_group_by_with_modifier(&self) -> bool {
+        false
+    }
+
+    /// Returns true if the dialect supports the `(+)` syntax for OUTER JOIN.
+    fn supports_outer_join_operator(&self) -> bool {
+        false
+    }
+
     /// Returns true if the dialect supports CONNECT BY.
     fn supports_connect_by(&self) -> bool {
+        false
+    }
+
+    /// Returns true if the dialect supports `EXECUTE IMMEDIATE` statements.
+    fn supports_execute_immediate(&self) -> bool {
         false
     }
 
@@ -304,6 +320,11 @@ pub trait Dialect: Debug + Any {
         false
     }
 
+    /// Returns true if the dialect supports numbers containing underscores, e.g. `10_000_000`
+    fn supports_numeric_literal_underscores(&self) -> bool {
+        false
+    }
+
     /// Returns true if the dialects supports specifying null treatment
     /// as part of a window function's parameter list as opposed
     /// to after the parameter list.
@@ -338,15 +359,6 @@ pub trait Dialect: Debug + Any {
     /// SELECT transform(array(1, 2, 3), x -> x + 1); -- returns [2,3,4]
     /// ```
     fn supports_lambda_functions(&self) -> bool {
-        false
-    }
-
-    /// Returns true if the dialect supports method calls, for example:
-    ///
-    /// ```sql
-    /// SELECT (SELECT ',' + name FROM sys.objects  FOR XML PATH(''), TYPE).value('.','NVARCHAR(MAX)')
-    /// ```
-    fn supports_methods(&self) -> bool {
         false
     }
 
@@ -447,8 +459,35 @@ pub trait Dialect: Debug + Any {
         false
     }
 
+    /// Return true if the dialect supports wildcard expansion on
+    /// arbitrary expressions in projections.
+    ///
+    /// Example:
+    /// ```sql
+    /// SELECT STRUCT<STRING>('foo').* FROM T
+    /// ```
+    fn supports_select_expr_star(&self) -> bool {
+        false
+    }
+
+    /// Return true if the dialect supports "FROM-first" selects.
+    ///
+    /// Example:
+    /// ```sql
+    /// FROM table
+    /// SELECT *
+    /// ```
+    fn supports_from_first_select(&self) -> bool {
+        false
+    }
+
     /// Does the dialect support MySQL-style `'user'@'host'` grantee syntax?
     fn supports_user_host_grantee(&self) -> bool {
+        false
+    }
+
+    /// Does the dialect support the `MATCH() AGAINST()` syntax?
+    fn supports_match_against(&self) -> bool {
         false
     }
 
@@ -543,6 +582,7 @@ pub trait Dialect: Debug + Any {
             Token::Word(w) if w.keyword == Keyword::SIMILAR => Ok(p!(Like)),
             Token::Word(w) if w.keyword == Keyword::OPERATOR => Ok(p!(Between)),
             Token::Word(w) if w.keyword == Keyword::DIV => Ok(p!(MulDivModOp)),
+            Token::Period => Ok(p!(Period)),
             Token::Eq
             | Token::Lt
             | Token::LtEq
@@ -616,6 +656,7 @@ pub trait Dialect: Debug + Any {
     /// Uses (APPROXIMATELY) <https://www.postgresql.org/docs/7.0/operators.htm#AEN2026> as a reference
     fn prec_value(&self, prec: Precedence) -> u8 {
         match prec {
+            Precedence::Period => 100,
             Precedence::DoubleColon => 50,
             Precedence::AtTz => 41,
             Precedence::MulDivModOp => 40,
@@ -788,7 +829,7 @@ pub trait Dialect: Debug + Any {
         keywords::RESERVED_FOR_IDENTIFIER.contains(&kw)
     }
 
-    // Returns reserved keywords when looking to parse a [TableFactor].
+    /// Returns reserved keywords when looking to parse a `TableFactor`.
     /// See [Self::supports_from_trailing_commas]
     fn get_reserved_keywords_for_table_factor(&self) -> &[Keyword] {
         keywords::RESERVED_FOR_TABLE_FACTOR
@@ -828,11 +869,17 @@ pub trait Dialect: Debug + Any {
         false
     }
 
+    /// Returns true if the specified keyword should be parsed as a column identifier.
+    /// See [keywords::RESERVED_FOR_COLUMN_ALIAS]
+    fn is_column_alias(&self, kw: &Keyword, _parser: &mut Parser) -> bool {
+        !keywords::RESERVED_FOR_COLUMN_ALIAS.contains(kw)
+    }
+
     /// Returns true if the specified keyword should be parsed as a select item alias.
     /// When explicit is true, the keyword is preceded by an `AS` word. Parser is provided
     /// to enable looking ahead if needed.
-    fn is_select_item_alias(&self, explicit: bool, kw: &Keyword, _parser: &mut Parser) -> bool {
-        explicit || !keywords::RESERVED_FOR_COLUMN_ALIAS.contains(kw)
+    fn is_select_item_alias(&self, explicit: bool, kw: &Keyword, parser: &mut Parser) -> bool {
+        explicit || self.is_column_alias(kw, parser)
     }
 
     /// Returns true if the specified keyword should be parsed as a table factor alias.
@@ -854,6 +901,26 @@ pub trait Dialect: Debug + Any {
     fn supports_string_escape_constant(&self) -> bool {
         false
     }
+
+    /// Returns true if the dialect supports the table hints in the `FROM` clause.
+    fn supports_table_hints(&self) -> bool {
+        false
+    }
+
+    /// Returns true if this dialect requires a whitespace character after `--` to start a single line comment.
+    ///
+    /// MySQL: <https://dev.mysql.com/doc/refman/8.4/en/ansi-diff-comments.html>
+    /// e.g. UPDATE account SET balance=balance--1
+    //       WHERE account_id=5752             ^^^ will be interpreted as two minus signs instead of a comment
+    fn requires_single_line_comment_whitespace(&self) -> bool {
+        false
+    }
+
+    /// Returns true if the dialect supports size definition for array types.
+    /// For example: ```CREATE TABLE my_table (my_array INT[3])```.
+    fn supports_array_typedef_size(&self) -> bool {
+        false
+    }
 }
 
 /// This represents the operators for which precedence must be defined
@@ -861,6 +928,7 @@ pub trait Dialect: Debug + Any {
 /// higher number -> higher precedence
 #[derive(Debug, Clone, Copy)]
 pub enum Precedence {
+    Period,
     DoubleColon,
     AtTz,
     MulDivModOp,
